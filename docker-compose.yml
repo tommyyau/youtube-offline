@@ -1,0 +1,10 @@
+version: '3'
+
+services:
+  youtube-offline:
+    build: .
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./downloads:/tmp
+    restart: unless-stopped 
