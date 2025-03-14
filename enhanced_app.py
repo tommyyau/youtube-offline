@@ -7,12 +7,17 @@ from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
 import tempfile
 import yt_dlp
+import time
+import threading
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 CORS(app)
 
 # Temporary storage for downloads
 TEMP_DIR = tempfile.gettempdir()
+
+# Dictionary to store download progress
+download_progress = {}
 
 # List of common desktop user agents to rotate
 USER_AGENTS = [
@@ -30,6 +35,50 @@ def get_random_user_agent():
 def sanitize_filename(filename):
     """Remove invalid characters from filename"""
     return re.sub(r'[\\/*?:"<>|]', "", filename)
+
+# Progress hook for yt-dlp
+def progress_hook(d):
+    download_id = d.get('info_dict', {}).get('id', 'unknown')
+    
+    if d['status'] == 'downloading':
+        try:
+            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+            downloaded_bytes = d.get('downloaded_bytes', 0)
+            
+            if total_bytes > 0:
+                percent = (downloaded_bytes / total_bytes) * 100
+                download_progress[download_id] = {
+                    'percent': round(percent, 2),
+                    'downloaded_bytes': downloaded_bytes,
+                    'total_bytes': total_bytes,
+                    'speed': d.get('speed', 0),
+                    'eta': d.get('eta', 0),
+                    'status': 'downloading',
+                    'filename': d.get('filename', ''),
+                    'last_updated': time.time()
+                }
+            else:
+                download_progress[download_id] = {
+                    'percent': 0,
+                    'status': 'downloading',
+                    'last_updated': time.time()
+                }
+        except Exception as e:
+            print(f"Error in progress hook: {str(e)}")
+    
+    elif d['status'] == 'finished':
+        download_progress[download_id] = {
+            'percent': 100,
+            'status': 'processing',
+            'last_updated': time.time()
+        }
+    
+    elif d['status'] == 'error':
+        download_progress[download_id] = {
+            'status': 'error',
+            'error': d.get('error', 'Unknown error'),
+            'last_updated': time.time()
+        }
 
 @app.route('/')
 def index():
@@ -255,6 +304,18 @@ def get_video_info():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/get_download_progress', methods=['GET'])
+def get_download_progress():
+    video_id = request.args.get('video_id', 'unknown')
+    
+    if video_id in download_progress:
+        return jsonify(download_progress[video_id])
+    else:
+        return jsonify({
+            'status': 'unknown',
+            'percent': 0
+        })
+
 @app.route('/download', methods=['POST'])
 def download_video():
     try:
@@ -269,6 +330,7 @@ def download_video():
         # Sanitize the filename
         filename = None
         is_audio_only = False
+        video_id = None
         
         # First get video info to determine if format is audio-only
         with yt_dlp.YoutubeDL({
@@ -282,12 +344,30 @@ def download_video():
                 return jsonify({'error': 'Could not fetch video information'}), 500
                 
             title = info_dict.get('title', 'video')
+            # More thorough sanitization of filename
             filename = sanitize_filename(title)
+            # Replace problematic characters with safe alternatives
+            filename = filename.replace('+', ' plus ').replace('&', ' and ').replace("'", "")
+            # Remove any other potentially problematic characters
+            filename = re.sub(r'[^\w\s.-]', '', filename)
+            # Trim excessive spaces
+            filename = re.sub(r'\s+', ' ', filename).strip()
+            
+            video_id = info_dict.get('id', 'unknown')
+            
+            # Initialize progress for this video
+            download_progress[video_id] = {
+                'percent': 0,
+                'status': 'starting',
+                'last_updated': time.time()
+            }
             
             # Check if the format is audio-only
             for format_entry in info_dict.get('formats', []):
                 if format_entry.get('format_id') == format_id and format_entry.get('vcodec') == 'none':
                     is_audio_only = True
+                    # Store this information in the progress dictionary
+                    download_progress[video_id]['is_audio_only'] = True
                     break
             
             # Also check if the selected format has audio already
@@ -309,7 +389,8 @@ def download_video():
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
                 }],
-                'verbose': True  # Enable verbose output for debugging
+                'verbose': True,  # Enable verbose output for debugging
+                'progress_hooks': [progress_hook]  # Add progress hook
             }
         else:
             # For video downloads
@@ -332,48 +413,145 @@ def download_video():
                 # Make sure FFmpeg knows to keep audio
                 'postprocessor_args': {
                     'ffmpeg': ['-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k']
-                }
+                },
+                'progress_hooks': [progress_hook]  # Add progress hook
             }
         
-        # Perform the download
-        print(f"Starting download with options: {ydl_opts}")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+        # Store the original filename and sanitized filename in the progress dictionary
+        download_progress[video_id]['original_filename'] = title
+        download_progress[video_id]['sanitized_filename'] = filename
+        download_progress[video_id]['is_audio_only'] = is_audio_only
         
-        # Determine output file extension
-        ext = 'mp3' if is_audio_only else 'mp4'
-        expected_filename = f"{filename}.{ext}"
-        file_path = os.path.join(TEMP_DIR, expected_filename)
+        # Perform the download in a separate thread
+        def download_thread():
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                
+                # Update progress to indicate processing is complete
+                download_progress[video_id] = {
+                    'percent': 100,
+                    'status': 'complete',
+                    'last_updated': time.time(),
+                    'original_filename': title,
+                    'sanitized_filename': filename,
+                    'is_audio_only': is_audio_only
+                }
+            except Exception as e:
+                print(f"Error in download thread: {str(e)}")
+                download_progress[video_id] = {
+                    'status': 'error',
+                    'error': str(e),
+                    'last_updated': time.time()
+                }
         
-        # If file doesn't exist with expected name, search for other possible names
-        if not os.path.exists(file_path):
-            print(f"File not found at expected path: {file_path}, searching for alternatives...")
-            for file in os.listdir(TEMP_DIR):
-                if file.startswith(filename):
-                    expected_filename = file
-                    file_path = os.path.join(TEMP_DIR, expected_filename)
-                    print(f"Found alternative file: {file_path}")
-                    break
+        # Start download in background thread
+        threading.Thread(target=download_thread).start()
         
-        # Verify file exists and has a reasonable size
-        if not os.path.exists(file_path):
-            return jsonify({'error': 'Downloaded file not found'}), 500
-        
-        file_size = os.path.getsize(file_path)
-        print(f"Download complete: {expected_filename}, size: {file_size / (1024*1024):.2f} MB")
-        
-        if file_size < 1024:  # If file is less than 1KB, it's probably corrupt
-            return jsonify({'error': 'Download failed, file is empty or corrupt'}), 500
-        
+        # Return immediately with video ID for progress tracking
         return jsonify({
             'success': True,
-            'message': 'Download completed successfully',
-            'download_path': f"/download_file?path={expected_filename}",
-            'file_size_mb': round(file_size / (1024*1024), 2)
+            'message': 'Download started',
+            'video_id': video_id,
+            'filename': filename
         })
     
     except Exception as e:
         print(f"Error in download_video: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/check_download_status', methods=['GET'])
+def check_download_status():
+    try:
+        video_id = request.args.get('video_id')
+        filename = request.args.get('filename')
+        
+        if not video_id or not filename:
+            return jsonify({'error': 'Video ID and filename are required'}), 400
+        
+        # Check if download is complete
+        if video_id in download_progress and download_progress[video_id].get('status') == 'complete':
+            # Determine output file extension
+            ext = 'mp3' if download_progress[video_id].get('is_audio_only', False) else 'mp4'
+            expected_filename = f"{filename}.{ext}"
+            file_path = os.path.join(TEMP_DIR, expected_filename)
+            
+            # If file doesn't exist with expected name, search for other possible names
+            if not os.path.exists(file_path):
+                print(f"File not found at expected path: {file_path}, searching for alternatives...")
+                
+                # More robust file search - handle special characters better
+                found_file = None
+                sanitized_filename = sanitize_filename(filename)
+                
+                # Try different variations of the filename
+                possible_filenames = [
+                    filename,                      # Original filename
+                    sanitized_filename,            # Sanitized filename
+                    filename.replace('+', ' '),    # Replace + with space
+                    filename.replace('&', 'and'),  # Replace & with 'and'
+                    filename.replace("'", "")      # Remove apostrophes
+                ]
+                
+                # Search for any file that starts with any of the possible filename variations
+                for file in os.listdir(TEMP_DIR):
+                    file_lower = file.lower()
+                    # Check if the file has the right extension
+                    if not file_lower.endswith(f'.{ext.lower()}'):
+                        continue
+                        
+                    # Check if the file matches any of our possible filename patterns
+                    for possible_name in possible_filenames:
+                        possible_name_lower = possible_name.lower()
+                        # Check if file starts with the possible name (case insensitive)
+                        if file_lower.startswith(possible_name_lower) or \
+                           possible_name_lower in file_lower or \
+                           file_lower.startswith(possible_name_lower.replace(' ', '_')):
+                            found_file = file
+                            break
+                    
+                    if found_file:
+                        break
+                
+                if found_file:
+                    expected_filename = found_file
+                    file_path = os.path.join(TEMP_DIR, expected_filename)
+                    print(f"Found alternative file: {file_path}")
+                else:
+                    # If still not found, try a more aggressive search for any file with similar content
+                    for file in os.listdir(TEMP_DIR):
+                        if file.endswith(f'.{ext}') and os.path.getmtime(os.path.join(TEMP_DIR, file)) > time.time() - 60:
+                            # This file has the right extension and was modified in the last minute
+                            expected_filename = file
+                            file_path = os.path.join(TEMP_DIR, expected_filename)
+                            print(f"Found recently modified file with matching extension: {file_path}")
+                            break
+            
+            # Verify file exists and has a reasonable size
+            if not os.path.exists(file_path):
+                return jsonify({'status': 'error', 'error': 'Downloaded file not found'}), 500
+            
+            file_size = os.path.getsize(file_path)
+            print(f"Download complete: {expected_filename}, size: {file_size / (1024*1024):.2f} MB")
+            
+            if file_size < 1024:  # If file is less than 1KB, it's probably corrupt
+                return jsonify({'status': 'error', 'error': 'Download failed, file is empty or corrupt'}), 500
+            
+            return jsonify({
+                'status': 'complete',
+                'download_path': f"/download_file?path={expected_filename}",
+                'file_size_mb': round(file_size / (1024*1024), 2)
+            })
+        
+        # Return current progress
+        if video_id in download_progress:
+            return jsonify(download_progress[video_id])
+        else:
+            return jsonify({'status': 'unknown', 'percent': 0})
+    
+    except Exception as e:
+        print(f"Error in check_download_status: {str(e)}")
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
@@ -385,6 +563,36 @@ def download_file():
             return jsonify({'error': 'No file path provided'}), 400
         
         file_path = os.path.join(TEMP_DIR, path)
+        
+        if not os.path.exists(file_path):
+            print(f"File not found at path: {file_path}, searching for alternatives...")
+            
+            # Try to find a file with a similar name
+            base_name = os.path.splitext(path)[0]
+            ext = os.path.splitext(path)[1]
+            
+            # Search for files with similar names
+            for file in os.listdir(TEMP_DIR):
+                file_base, file_ext = os.path.splitext(file)
+                
+                # Check if extensions match and if the filename is similar
+                if file_ext.lower() == ext.lower() and (
+                    file_base.lower().startswith(base_name.lower()) or
+                    base_name.lower() in file_base.lower() or
+                    file_base.lower().startswith(base_name.lower().replace(' ', '_')) or
+                    file_base.lower().startswith(base_name.lower().replace('+', ' '))
+                ):
+                    file_path = os.path.join(TEMP_DIR, file)
+                    print(f"Found alternative file for download: {file_path}")
+                    break
+            
+            # If still not found, try to find any recently created file with the right extension
+            if not os.path.exists(file_path):
+                for file in os.listdir(TEMP_DIR):
+                    if file.endswith(ext) and os.path.getmtime(os.path.join(TEMP_DIR, file)) > time.time() - 60:
+                        file_path = os.path.join(TEMP_DIR, file)
+                        print(f"Found recently modified file for download: {file_path}")
+                        break
         
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
