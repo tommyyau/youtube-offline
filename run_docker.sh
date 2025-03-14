@@ -22,7 +22,7 @@ echo "Building and starting YouTube Offline Downloader..."
 docker-compose up --build -d
 
 echo "YouTube Offline Downloader is running!"
-echo "Open your browser and go to: http://localhost:5001"
+echo "Open your browser and go to: http://localhost:5001/enhanced"
 echo "Downloaded files will be saved in the 'downloads' directory."
 echo ""
 echo "To stop the application, run: docker-compose down" 

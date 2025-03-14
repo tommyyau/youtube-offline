@@ -54,7 +54,8 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 3. Install required packages:
 ```bash
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
 4. Run the application:
@@ -62,7 +63,52 @@ pip install -r requirements.txt
 python enhanced_app.py
 ```
 
-5. Access the application at `http://localhost:5000/enhanced`
+5. Access the application at `http://localhost:5001/enhanced`
+
+## Troubleshooting
+
+### Segmentation Fault During Installation
+
+If you encounter a segmentation fault when installing dependencies:
+
+```
+segmentation fault  pip install -r requirements.txt
+```
+
+Try the following steps:
+
+1. Create a new virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate
+```
+
+2. Upgrade pip first:
+```bash
+python -m pip install --upgrade pip
+```
+
+3. Then install the requirements:
+```bash
+python -m pip install -r requirements.txt
+```
+
+### Port Already in Use
+
+If you see an error about port 5000 being in use (common on macOS):
+
+```
+Address already in use
+Port 5000 is in use by another program.
+```
+
+The application is now configured to use port 5001 by default. If you still encounter port issues:
+
+1. On macOS, you may need to disable AirPlay Receiver:
+   - Go to System Preferences -> General -> AirDrop & Handoff
+   - Disable the 'AirPlay Receiver' service
+
+2. Alternatively, you can modify the port in `enhanced_app.py` and `app.py` to use a different port.
 
 ## Future Enhancements
 

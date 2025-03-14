@@ -16,6 +16,7 @@ RUN apt-get update && \
     ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir --upgrade yt-dlp
 
@@ -23,7 +24,7 @@ RUN apt-get update && \
 COPY . .
 
 # Expose port
-EXPOSE 5000
+EXPOSE 5001
 
 # Run the application (explicitly using the enhanced version)
 CMD ["python", "enhanced_app.py"] 
