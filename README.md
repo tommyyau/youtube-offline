@@ -33,6 +33,10 @@ cd youtube-offline
 
 2. Build and start the container:
 ```bash
+# For first-time setup or after code changes, use:
+docker-compose up --build -d
+
+# For subsequent starts (when no code has changed):
 docker-compose up -d
 ```
 
@@ -126,6 +130,7 @@ To make enhancements to this project:
 1. Make your code changes
 2. If using Docker, rebuild and restart:
 ```bash
+# Always use --build when you've made code changes
 docker-compose down
 docker-compose up --build -d
 ```
