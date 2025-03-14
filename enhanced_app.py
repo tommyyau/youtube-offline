@@ -344,8 +344,13 @@ def download_video():
                 return jsonify({'error': 'Could not fetch video information'}), 500
                 
             title = info_dict.get('title', 'video')
+            uploader = info_dict.get('uploader', 'Unknown')
+            
+            # Create filename with creator and title: "Creator - Title"
+            combined_name = f"{uploader} - {title}"
+            
             # More thorough sanitization of filename
-            filename = sanitize_filename(title)
+            filename = sanitize_filename(combined_name)
             # Replace problematic characters with safe alternatives
             filename = filename.replace('+', ' plus ').replace('&', ' and ').replace("'", "")
             # Remove any other potentially problematic characters
@@ -418,7 +423,7 @@ def download_video():
             }
         
         # Store the original filename and sanitized filename in the progress dictionary
-        download_progress[video_id]['original_filename'] = title
+        download_progress[video_id]['original_filename'] = combined_name
         download_progress[video_id]['sanitized_filename'] = filename
         download_progress[video_id]['is_audio_only'] = is_audio_only
         
@@ -433,7 +438,7 @@ def download_video():
                     'percent': 100,
                     'status': 'complete',
                     'last_updated': time.time(),
-                    'original_filename': title,
+                    'original_filename': combined_name,
                     'sanitized_filename': filename,
                     'is_audio_only': is_audio_only
                 }
