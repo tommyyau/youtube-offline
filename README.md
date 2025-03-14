@@ -27,7 +27,7 @@ A simple web application that allows you to download YouTube videos for offline 
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/youtube-offline.git
+git clone https://github.com/tommyyau/youtube-offline.git
 cd youtube-offline
 ```
 
@@ -42,7 +42,7 @@ docker-compose up -d
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/youtube-offline.git
+git clone https://github.com/tommyyau/youtube-offline.git
 cd youtube-offline
 ```
 
