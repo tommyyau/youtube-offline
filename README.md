@@ -13,7 +13,7 @@ A simple web application that allows you to download YouTube videos for offline 
 
 ## Screenshots
 
-![YouTube Offline Downloader](https://via.placeholder.com/800x400?text=YouTube+Offline+Downloader)
+![image](https://github.com/user-attachments/assets/e330948a-b909-47a6-8a23-e2a670fa42c5)
 
 ## Technologies Used
 
