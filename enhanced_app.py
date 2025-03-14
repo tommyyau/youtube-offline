@@ -52,7 +52,7 @@ def progress_hook(d):
                     'downloaded_bytes': downloaded_bytes,
                     'total_bytes': total_bytes,
                     'speed': d.get('speed', 0),
-                    'eta': d.get('eta', 0),
+                    'eta': round(d.get('eta', 0), 2),
                     'status': 'downloading',
                     'filename': d.get('filename', ''),
                     'last_updated': time.time()
